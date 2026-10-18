@@ -86,7 +86,7 @@ python scripts/ste-lint-zh.py --max-chars 25 f   # 程序步骤用 25 字上限
 python scripts/ste-lint-zh.py --baseline 12 f    # 存量文档：容忍 12 处硬违规
 python scripts/ste-lint-zh.py --disable vague-word,synonym-rotation f
 python scripts/ste-lint-zh.py --list-rules       # 列出全部规则
-python scripts/ste-lint-zh.py --selftest         # 自检（20 项）
+python scripts/ste-lint-zh.py --selftest         # 自检（25 项）
 ```
 
 硬违规：`semicolon`、`long-sentence`、`nominalization`、`marketing-adjective`、`empty-phrase`、
@@ -96,6 +96,13 @@ python scripts/ste-lint-zh.py --selftest         # 自检（20 项）
 
 linter 只做机械首查：它不比较原文与改写、不判断情态强度、不证明原意保留。零违规只说明这几项机械检查没发现问题。
 
+Markdown 行内链接的文字参与检查。图片的替代文字也参与检查。
+链接地址、链接标题和行内代码不参与检查。
+检查结果保留原始行号和列号。
+
+默认句长上限是 40 字。指令文本需加 `--max-chars 25`。
+一句一动作、每段最多 6 句等规则仍需逐句检查。
+
 ## 仓库结构
 
 ```
@@ -103,6 +110,7 @@ SKILL.md                     技能正文（规则、模式、流程、输出格
 references/writing-rules.md  规则全集 + 与上游九节 53 条的对应 + 中文特有的坑
 examples/before-after.md     8 组前后对照；after-only.md 是改写列的 lint 夹具（硬违规 0）
 scripts/ste-lint-zh.py       确定性 linter（stdlib-only，含 --selftest）
+tests/test_markdown_links.py Markdown 链接的命令行回归测试（stdlib-only）
 docs/wechat-article.md       公众号文章稿：方法论 + Karpathy 原话 + 安装方式
 NOTICE.md                    与上游的关系、差异清单、许可
 ```
@@ -112,6 +120,7 @@ NOTICE.md                    与上游的关系、差异清单、许可
 ```bash
 python scripts/ste-lint-zh.py --selftest          # 应打印 selftest OK
 python scripts/ste-lint-zh.py examples/after-only.md  # 应打印 硬违规 0 处（退出码 0）
+python -m unittest discover -s tests -v          # Markdown 链接回归测试
 ```
 
 ## 许可

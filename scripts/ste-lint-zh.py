@@ -53,7 +53,8 @@ RULE_ORDER = list(RULE_SEVERITY)
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 SENT_END_RE = re.compile(r"[。！？!?]+")
-MASK_RE = re.compile(r"`[^`\n]*`|https?://\S+|\[[^\]]*\]\([^)]*\)")
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+URL_RE = re.compile(r"https?://\S+")
 LIST_MARK_RE = re.compile(r"^(\s*(?:#{1,6}|[-*+]|\d{1,3}[.)]|>)\s+)")
 SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;]")
 
@@ -170,12 +171,66 @@ def count_chars(text: str) -> int:
     return cjk + latin
 
 
+def link_destination_end(line: str, start: int) -> Optional[int]:
+    """Return the end of a parenthesized inline destination, if it closes."""
+    depth = 1
+    in_angle = False
+    quote: Optional[str] = None
+    index = start + 1
+    while index < len(line):
+        char = line[index]
+        if char == "\\":
+            index += 2
+            continue
+        if in_angle:
+            if char == ">":
+                in_angle = False
+        elif quote is not None:
+            if char == quote:
+                quote = None
+        elif char == "<" and depth == 1 and not line[start + 1:index].strip():
+            in_angle = True
+        elif char in "\"'" and depth == 1 and line[index - 1].isspace():
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return None
+
+
 def mask_line(line: str) -> str:
-    """把行内代码、URL、markdown 链接替换成等长空格 —— 代码不是散文，不参与检查。"""
+    """用等长空格屏蔽代码和链接地址。保留链接文字及其原始列号。"""
     chars = list(line)
-    for match in MASK_RE.finditer(line):
-        for index in range(match.start(), match.end()):
-            chars[index] = " "
+    for match in INLINE_CODE_RE.finditer(line):
+        chars[match.start():match.end()] = " " * (match.end() - match.start())
+
+    # Scan outside inline code so literal brackets cannot start a link.
+    visible = "".join(chars)
+    bracket_depth = 0
+    index = 0
+    while index < len(visible):
+        char = visible[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            bracket_depth += 1
+        elif char == "]" and bracket_depth:
+            bracket_depth -= 1
+            if index + 1 < len(visible) and visible[index + 1] == "(":
+                end = link_destination_end(visible, index + 1)
+                if end is not None:
+                    chars[index + 1:end] = " " * (end - index - 1)
+                    index = end
+                    continue
+        index += 1
+
+    for match in URL_RE.finditer("".join(chars)):
+        chars[match.start():match.end()] = " " * (match.end() - match.start())
     return "".join(chars)
 
 
@@ -450,6 +505,13 @@ def selftest() -> int:
     check("情态永不标记（可能已失败）", rules("请求可能已失败。") == [])
     check("代码块里的分号不算", rules("```\n先开票；再发货\n```") == [])
     check("行内代码被屏蔽", rules("用 `a；b` 分隔即可。") == [])
+    check("链接文字参与检查", "nominalization" in rules("[请对日志进行分析。](https://example.com)"))
+    check("链接地址不参与检查", rules("[读取配置](docs/(缓存)/进行分析;强大.md)。") == [])
+    check("链接文字中的代码仍被屏蔽", rules("[运行 `a(); b()`。](docs/config.md)") == [])
+    link = "[先开票；再发货。](docs/config.md)"
+    link_findings = analyze(link)
+    check("链接文字保留原始列号", len(link_findings) == 1 and link_findings[0].col == link.index("；") + 1)
+    check("链接文字参与同义轮换检查", "synonym-rotation" in rules("[用户](docs/a)登录。[客户](docs/b)退出。"))
     check("分号被判硬违规", "semicolon" in rules("先开票；再发货。"))
     check("名词化被判", "nominalization" in rules("我们需要对日志进行分析。"))
     check("营销形容词被判", rules("这是一款无缝又强大的工具。").count("marketing-adjective") == 2)
